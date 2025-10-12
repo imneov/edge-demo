@@ -1,7 +1,9 @@
 import { NextResponse } from 'next/server'
+import { getRuntimeConfig } from '../config/update/route'
 
 export async function GET() {
-  const nodeExporterUrl = process.env.NODE_EXPORTER_URL || 'http://localhost:9100'
+  const runtimeConfig = getRuntimeConfig()
+  const nodeExporterUrl = runtimeConfig.nodeExporterUrl || process.env.NODE_EXPORTER_URL || 'http://localhost:9100'
   
   try {
     const response = await fetch(`${nodeExporterUrl}/metrics`)

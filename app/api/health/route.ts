@@ -1,11 +1,13 @@
 import { NextResponse } from 'next/server'
+import { getRuntimeConfig } from '../config/update/route'
 
 /**
  * 代理模型服务的健康检查请求
  * 用于避免CORS问题
  */
 export async function GET() {
-  const modelServiceUrl = process.env.MODEL_SERVICE_URL || 'http://localhost:19000'
+  const runtimeConfig = getRuntimeConfig()
+  const modelServiceUrl = runtimeConfig.modelServiceUrl || process.env.MODEL_SERVICE_URL || 'http://localhost:19000'
 
   try {
     const response = await fetch(`${modelServiceUrl}/health`, {

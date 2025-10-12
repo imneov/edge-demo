@@ -10,10 +10,16 @@ let selectedData = null;
 let inferCount = 0;
 let nodeData = null;
 let nodeMetrics = null;
-let currentNodeName = 'node-009';
-let currentAppUrl = 'http://localhost:8000';
+let currentAppUrl = 'http://localhost:19000';
+let currentNodeExporterUrl = 'http://localhost:9100';
 let modelReady = false;
 let config = null; // 从API加载的配置
+let lastInferenceLatency = 0; // 最后一次推理延迟(ms)
+let inferenceHistory = []; // 推理历史记录
+
+// CPU统计数据(用于计算使用率)
+let lastCpuStats = null;
+let lastCpuTime = null;
 
 // 模拟测试结果(用于API调用失败时的降级)
 const testResults = [
@@ -42,8 +48,8 @@ async function loadConfig() {
             console.log('Configuration loaded:', config);
 
             // 更新全局变量
-            currentNodeName = config.nodeName;
             currentAppUrl = config.modelServiceUrl;
+            currentNodeExporterUrl = config.nodeExporterUrl;
 
             return true;
         } else {
@@ -98,10 +104,23 @@ function parsePrometheusMetrics(metricsText) {
         }
 
         // 解析指标行: metric_name{label1="value1"} value timestamp
-        const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*){.*?}\s+([\d.]+)/);
+        // 修复正则表达式,支持科学计数法(如 1.23e+09)
+        const match = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*){.*?}\s+([\d.eE+-]+)/);
         if (match) {
             const metricName = match[1];
             const value = parseFloat(match[2]);
+
+            if (!metrics[metricName]) {
+                metrics[metricName] = [];
+            }
+            metrics[metricName].push(value);
+        }
+
+        // 同时支持没有标签的指标: metric_name value
+        const simpleMatch = line.match(/^([a-zA-Z_:][a-zA-Z0-9_:]*)\s+([\d.eE+-]+)/);
+        if (simpleMatch && !match) {
+            const metricName = simpleMatch[1];
+            const value = parseFloat(simpleMatch[2]);
 
             if (!metrics[metricName]) {
                 metrics[metricName] = [];
@@ -113,19 +132,40 @@ function parsePrometheusMetrics(metricsText) {
     console.log('Parsed Prometheus metrics:', metrics);
 
     // 计算CPU使用率
-    // node_cpu_seconds_total 是累计值,需要计算差值
-    // 这里简化处理,使用模拟值
+    // node_cpu_seconds_total 是累计值,需要计算两次采样之间的差值
     const cpuMetrics = metrics['node_cpu_seconds_total'];
     if (cpuMetrics && cpuMetrics.length > 0) {
-        // 简化计算: 取平均值的方式估算CPU使用率
-        // 实际应该使用rate()函数计算变化率
-        nodeMetrics = nodeMetrics || {};
-        nodeMetrics.cpuUsagePercent = Math.min(100, Math.random() * 30 + 20); // 暂时使用随机值
+        const currentTime = Date.now();
+        const currentCpuTotal = cpuMetrics.reduce((sum, val) => sum + val, 0);
+
+        if (lastCpuStats !== null && lastCpuTime !== null) {
+            const timeDelta = (currentTime - lastCpuTime) / 1000; // 转换为秒
+            const cpuDelta = currentCpuTotal - lastCpuStats;
+
+            // CPU使用率 = (CPU时间增量 / (时间间隔 * CPU核心数)) * 100
+            // cpuMetrics.length 代表CPU核心数(每个核心一个指标)
+            const cpuUsage = (cpuDelta / (timeDelta * cpuMetrics.length)) * 100;
+
+            nodeMetrics = nodeMetrics || {};
+            nodeMetrics.cpuUsagePercent = Math.max(0, Math.min(100, cpuUsage));
+            console.log(`CPU usage: ${nodeMetrics.cpuUsagePercent.toFixed(2)}% (cores: ${cpuMetrics.length})`);
+        }
+
+        // 保存当前统计数据供下次计算使用
+        lastCpuStats = currentCpuTotal;
+        lastCpuTime = currentTime;
     }
 
     // 计算内存使用率
     const memTotal = getMetricValue(metrics, 'node_memory_MemTotal_bytes');
     const memAvailable = getMetricValue(metrics, 'node_memory_MemAvailable_bytes');
+
+    console.log('Memory metrics:', {
+        memTotal,
+        memAvailable,
+        memTotalGB: memTotal ? (memTotal / 1024 / 1024 / 1024).toFixed(2) + ' GB' : 'N/A',
+        memAvailableGB: memAvailable ? (memAvailable / 1024 / 1024 / 1024).toFixed(2) + ' GB' : 'N/A'
+    });
 
     if (memTotal && memAvailable) {
         const memUsed = memTotal - memAvailable;
@@ -133,7 +173,10 @@ function parsePrometheusMetrics(metricsText) {
 
         nodeMetrics = nodeMetrics || {};
         nodeMetrics.memoryUsagePercent = Math.max(0, Math.min(100, memPercent));
-        console.log('Calculated memory usage:', nodeMetrics.memoryUsagePercent.toFixed(2) + '%');
+        console.log('Calculated memory usage:', {
+            memUsedGB: (memUsed / 1024 / 1024 / 1024).toFixed(2) + ' GB',
+            memPercent: nodeMetrics.memoryUsagePercent.toFixed(2) + '%'
+        });
     }
 
     // 如果没有获取到任何指标,使用模拟数据
@@ -247,13 +290,13 @@ function updateModelStatus() {
 
     if (modelReady) {
         statusElement.innerHTML = '已加载 <span class="status-indicator online"></span>';
-        nodeStatusElement.textContent = '模型已就绪';
+        nodeStatusElement.textContent = 'VGG模型已就绪';
         document.getElementById('nodeIcon').textContent = '🚀';
         document.getElementById('sendDataBtn').disabled = false;
         isDeployed = true;
     } else {
         statusElement.innerHTML = '未加载 <span class="status-indicator offline"></span>';
-        nodeStatusElement.textContent = '模型未就绪';
+        nodeStatusElement.textContent = 'VGG模型未就绪';
         document.getElementById('nodeIcon').textContent = '🔧';
         document.getElementById('sendDataBtn').disabled = true;
         isDeployed = false;
@@ -286,6 +329,64 @@ function showToast(message) {
 }
 
 /**
+ * 更新推理历史记录
+ * @param {number} id - 序号
+ * @param {string} imageName - 图片文件名
+ * @param {Object} result - 推理结果
+ */
+function addInferenceHistory(id, imageName, result) {
+    // 诊断结果映射
+    const diagMap = {
+        'normal': '正常',
+        'lost circulation': '井漏',
+        'stuck pipe risk': '卡钻风险',
+        'pressure anomaly': '压力异常'
+    };
+
+    // 添加到历史记录(最多保留10条)
+    inferenceHistory.unshift({
+        id,
+        imageName,
+        diagnosis: diagMap[result.message] || result.message,
+        confidence: (result.probability * 100).toFixed(1),
+        latency: result.latency,
+        timestamp: new Date().toLocaleTimeString()
+    });
+
+    // 只保留最近10条记录
+    if (inferenceHistory.length > 10) {
+        inferenceHistory = inferenceHistory.slice(0, 10);
+    }
+
+    // 更新历史记录显示
+    updateHistoryDisplay();
+}
+
+/**
+ * 更新历史记录显示
+ */
+function updateHistoryDisplay() {
+    const tbody = document.getElementById('historyTableBody');
+    if (!tbody) return;
+
+    if (inferenceHistory.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: #8892a0;">暂无推理记录</td></tr>';
+        return;
+    }
+
+    tbody.innerHTML = inferenceHistory.map(record => `
+        <tr>
+            <td>${record.id}</td>
+            <td>${record.imageName}</td>
+            <td class="${record.diagnosis === '井漏' ? 'result-danger' : record.diagnosis === '正常' ? 'result-normal' : 'result-warning'}">
+                ${record.diagnosis}
+            </td>
+            <td>${record.confidence}%</td>
+        </tr>
+    `).join('');
+}
+
+/**
  * 更新步骤状态
  * @param {string} step - 步骤ID
  */
@@ -304,7 +405,7 @@ function updateStep(step) {
  * 调用真实API进行推理
  * 通过Next.js API代理避免CORS问题
  * @param {string} imageId - 图像ID
- * @returns {Promise<Object>} - 推理结果
+ * @returns {Promise<Object>} - 推理结果包含延迟信息
  */
 async function callPredictionAPI(imageId) {
     try {
@@ -332,7 +433,9 @@ async function callPredictionAPI(imageId) {
 
         if (response.ok) {
             const result = await response.json();
-            console.log('✅ Prediction result from API:', result);
+            // 后端已经计算了推理延迟(不包括图片下载时间)
+            lastInferenceLatency = result.latency || 0;
+            console.log('✅ Prediction result from API:', result, `(inference latency: ${result.latency}ms)`);
             return result;
         } else {
             const errorData = await response.json().catch(() => ({}));
@@ -342,7 +445,10 @@ async function callPredictionAPI(imageId) {
     } catch (error) {
         console.warn('⚠️ API调用失败，使用模拟数据:', error);
         // 如果API调用失败，使用模拟数据
-        return testResults[parseInt(imageId) || 0] || testResults[0];
+        const result = testResults[parseInt(imageId) || 0] || testResults[0];
+        const mockLatency = Math.floor(Math.random() * 100) + 50; // 50-150ms模拟延迟
+        lastInferenceLatency = mockLatency;
+        return { ...result, latency: mockLatency };
     }
 }
 
@@ -377,8 +483,12 @@ async function initializeSystem() {
  */
 function setupSettingsButton() {
     document.getElementById('settingsBtn').addEventListener('click', () => {
-        document.getElementById('nodeNameInput').value = currentNodeName;
-        document.getElementById('appUrlInput').value = currentAppUrl;
+        // 从配置加载当前值,如果没有加载成功则使用当前值
+        const appUrl = config?.modelServiceUrl || currentAppUrl;
+        const nodeExporterUrl = config?.nodeExporterUrl || currentNodeExporterUrl;
+
+        document.getElementById('appUrlInput').value = appUrl;
+        document.getElementById('nodeExporterInput').value = nodeExporterUrl;
         document.getElementById('settingsModal').classList.add('show');
     });
 
@@ -400,16 +510,16 @@ function setupSettingsButton() {
 
     // 保存设置
     document.getElementById('saveBtn').addEventListener('click', async () => {
-        const newNodeName = document.getElementById('nodeNameInput').value.trim();
         const newAppUrl = document.getElementById('appUrlInput').value.trim();
+        const newNodeExporterUrl = document.getElementById('nodeExporterInput').value.trim();
 
-        if (!newNodeName) {
-            showToast('节点名称不能为空');
+        if (!newAppUrl) {
+            showToast('模型服务地址不能为空');
             return;
         }
 
-        if (!newAppUrl) {
-            showToast('应用地址不能为空');
+        if (!newNodeExporterUrl) {
+            showToast('Node Exporter 地址不能为空');
             return;
         }
 
@@ -417,23 +527,59 @@ function setupSettingsButton() {
         try {
             new URL(newAppUrl);
         } catch (e) {
-            showToast('请输入有效的URL地址，如: http://localhost:8000');
+            showToast('请输入有效的模型服务地址，如: http://localhost:19000');
             return;
         }
 
-        // 更新配置
-        currentNodeName = newNodeName;
-        currentAppUrl = newAppUrl;
+        try {
+            new URL(newNodeExporterUrl);
+        } catch (e) {
+            showToast('请输入有效的 Node Exporter 地址，如: http://localhost:9100');
+            return;
+        }
 
-        // 关闭模态框
-        document.getElementById('settingsModal').classList.remove('show');
+        // 调用API更新配置
+        try {
+            const response = await fetch('/api/config/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    modelServiceUrl: newAppUrl,
+                    nodeExporterUrl: newNodeExporterUrl,
+                    nodeName: 'hw002', // 保持默认值
+                }),
+            });
 
-        // 显示提示
-        showToast(`设置已更新：节点 ${currentNodeName}，应用 ${currentAppUrl}`);
+            if (response.ok) {
+                const result = await response.json();
+                console.log('Configuration updated successfully:', result);
 
-        // 重新加载数据
-        await fetchNodeMetrics();
-        await checkAppStatus();
+                // 更新本地变量
+                currentAppUrl = newAppUrl;
+                currentNodeExporterUrl = newNodeExporterUrl;
+
+                // 重新加载配置
+                await loadConfig();
+
+                // 关闭模态框
+                document.getElementById('settingsModal').classList.remove('show');
+
+                // 显示提示
+                showToast('设置已更新');
+
+                // 重新加载数据
+                await fetchNodeMetrics();
+                await checkAppStatus();
+            } else {
+                const error = await response.json();
+                showToast('保存失败: ' + (error.error || '未知错误'));
+            }
+        } catch (error) {
+            console.error('Failed to save configuration:', error);
+            showToast('保存配置失败，请检查网络连接');
+        }
     });
 }
 
@@ -505,6 +651,9 @@ function setupSendDataButton() {
                 inferCount++;
                 document.getElementById('inferCount').textContent = inferCount;
 
+                // 更新延迟显示
+                document.getElementById('avgLatency').textContent = result.latency + 'ms';
+
                 // 更新结果图片
                 const resultImage = document.getElementById('resultImage');
                 const mainImage = document.getElementById('mainImage');
@@ -515,13 +664,14 @@ function setupSendDataButton() {
                 document.getElementById('resultJson').innerHTML = `{
   "message": "${result.message}",
   "prediction": ${result.prediction},
-  "probability": ${result.probability.toFixed(4)}
+  "probability": ${result.probability.toFixed(4)},
+  "latency": ${result.latency}
 }`;
 
                 // 显示诊断结果和叠加效果
                 const diagMap = {
                     'normal': '正常',
-                    'lost circulation': '失循环故障',
+                    'lost circulation': '井漏',
                     'stuck pipe risk': '卡钻风险',
                     'pressure anomaly': '压力异常'
                 };
@@ -548,13 +698,17 @@ function setupSendDataButton() {
                 document.getElementById('diagText').textContent = '诊断: ' + diagMap[result.message];
                 document.getElementById('diagConf').textContent = '置信度: ' + (result.probability * 100).toFixed(1) + '%';
 
+                // 添加到推理历史记录
+                const imageName = `test_image_${selectedData.padStart(3, '0')}.png`;
+                addInferenceHistory(inferCount, imageName, result);
+
                 document.getElementById('nodeIcon').classList.remove('processing');
                 document.getElementById('processingIndicator').classList.remove('active');
 
                 this.disabled = false;
-                this.textContent = '发送数据到边缘节点';
+                this.textContent = '发送数据';
 
-                showToast('推理完成');
+                showToast(`推理完成 (耗时: ${result.latency}ms)`);
             }, 1000);
         }, 1500);
     });
@@ -575,11 +729,6 @@ function startPeriodicTasks() {
     setInterval(async () => {
         await checkAppStatus();
     }, 10000);
-
-    // 定期更新延时显示（每3秒）
-    setInterval(() => {
-        document.getElementById('avgLatency').textContent = (100 + Math.random() * 50).toFixed(0) + 'ms';
-    }, 3000);
 }
 
 // ==================== 入口点 ====================

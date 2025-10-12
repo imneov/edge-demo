@@ -55,6 +55,104 @@
             margin-top: 5px;
         }
 
+        .app-info {
+            max-width: 900px;
+            margin: 15px auto 0;
+            padding: 12px 20px;
+            background: rgba(0, 212, 255, 0.05);
+            border: 1px solid rgba(0, 212, 255, 0.15);
+            border-radius: 8px;
+            font-size: 13px;
+            line-height: 1.6;
+        }
+
+        .app-info-title {
+            color: #00d4ff;
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .app-info-content {
+            color: #a8b2c0;
+        }
+
+        .card-subtitle {
+            font-size: 12px;
+            color: #8892a0;
+            margin-top: -8px;
+            margin-bottom: 12px;
+            line-height: 1.5;
+        }
+
+        /* 推理历史表格样式 */
+        .history-table-container {
+            margin-top: 15px;
+            background: rgba(15, 20, 25, 0.6);
+            border-radius: 8px;
+            padding: 12px;
+            height: 350px;
+            max-height: 350px;
+            overflow-y: auto;
+            overflow-x: hidden;
+        }
+
+        .history-table-container::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .history-table-container::-webkit-scrollbar-track {
+            background: rgba(26, 35, 50, 0.5);
+            border-radius: 3px;
+        }
+
+        .history-table-container::-webkit-scrollbar-thumb {
+            background: rgba(0, 212, 255, 0.5);
+            border-radius: 3px;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 12px;
+        }
+
+        .history-table th {
+            color: #00d4ff;
+            font-weight: 600;
+            padding: 8px 10px;
+            text-align: left;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.2);
+            position: sticky;
+            top: 0;
+            background: rgba(15, 20, 25, 0.9);
+        }
+
+        .history-table td {
+            padding: 8px 10px;
+            border-bottom: 1px solid rgba(0, 212, 255, 0.1);
+            color: #e0e6ed;
+        }
+
+        .history-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .history-table tbody tr:hover {
+            background: rgba(0, 212, 255, 0.05);
+        }
+
+        .result-normal {
+            color: #00ff88;
+        }
+
+        .result-warning {
+            color: #ffaa00;
+        }
+
+        .result-danger {
+            color: #ff4444;
+        }
+
         /* 返回按钮 */
         .back-btn {
             position: absolute;
@@ -207,8 +305,8 @@
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 10px;
-            flex: 1;
-            overflow-y: auto;
+            flex: 0 0 auto;
+            overflow: hidden;
             align-content: start;
         }
 
@@ -940,8 +1038,6 @@
 </head>
 <body>
     <div class="container">
-
-
         <!-- 边缘层 -->
         <div class="edge-layer">
             <div class="layer-label">边缘 Edge</div>
@@ -968,6 +1064,7 @@
                         <div class="card-icon">📡</div>
                         数据源
                     </div>
+                    <div class="card-subtitle">录井参数数据 · 钻井现场采集</div>
 
                     <div class="data-source-main-area">
                         <div class="image-display-area">
@@ -1031,6 +1128,7 @@
                             ⚙️ 设置
                         </button>
                     </div>
+                    <div class="card-subtitle">VGG模型实时推理 · 边缘侧低延时处理</div>
                     <div class="node-visual">
                         <div class="node-icon" id="nodeIcon">🔧</div>
                         <div class="node-status" id="nodeStatus">等待部署</div>
@@ -1061,9 +1159,28 @@
                                 <div class="status-value" id="inferCount">0</div>
                             </div>
                             <div class="status-item">
-                                <div class="status-label">平均延时</div>
-                                <div class="status-value" id="avgLatency">120ms</div>
+                                <div class="status-label">最近延时</div>
+                                <div class="status-value" id="avgLatency">-</div>
                             </div>
+                        </div>
+
+                        <!-- 推理历史记录 -->
+                        <div class="history-table-container">
+                            <table class="history-table">
+                                <thead>
+                                    <tr>
+                                        <th style="width: 15%;">序号</th>
+                                        <th style="width: 45%;">图片</th>
+                                        <th style="width: 25%;">诊断</th>
+                                        <th style="width: 15%;">置信度</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="historyTableBody">
+                                    <tr>
+                                        <td colspan="4" style="text-align: center; color: #8892a0;">暂无推理记录</td>
+                                    </tr>
+                                </tbody>
+                            </table>
                         </div>
                     </div>
                 </div>
@@ -1077,6 +1194,7 @@
                         <div class="card-icon">📊</div>
                         判断结果
                     </div>
+                    <div class="card-subtitle">井漏风险判定 · 风险概率评估</div>
                     <div class="result-content">
                         <!-- 图片展示区域 -->
                         <div class="result-image-container">
@@ -1114,12 +1232,12 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label class="form-label">节点名称</label>
-                    <input type="text" class="form-input" id="nodeNameInput" placeholder="请输入节点名称" value="node-009">
+                    <label class="form-label">模型服务地址</label>
+                    <input type="text" class="form-input" id="appUrlInput" placeholder="请输入模型服务地址，如: http://localhost:19000" value="http://localhost:19000">
                 </div>
                 <div class="form-group">
-                    <label class="form-label">应用地址</label>
-                    <input type="text" class="form-input" id="appUrlInput" placeholder="请输入应用地址，如: http://localhost:8000" value="http://localhost:8000">
+                    <label class="form-label">Node Exporter 地址</label>
+                    <input type="text" class="form-input" id="nodeExporterInput" placeholder="请输入 Node Exporter 地址，如: http://localhost:9100" value="http://localhost:9100">
                 </div>
             </div>
             <div class="modal-footer">

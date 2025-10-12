@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { getRuntimeConfig } from '../config/update/route'
 
 /**
  * 代理模型服务的推理请求
@@ -6,7 +7,8 @@ import { NextRequest, NextResponse } from 'next/server'
  * 从imageUrl下载图片,然后以multipart/form-data格式转发给后端
  */
 export async function POST(request: NextRequest) {
-  const modelServiceUrl = process.env.MODEL_SERVICE_URL || 'http://localhost:19000'
+  const runtimeConfig = getRuntimeConfig()
+  const modelServiceUrl = runtimeConfig.modelServiceUrl || process.env.MODEL_SERVICE_URL || 'http://localhost:19000'
 
   try {
     // 读取请求体
@@ -42,16 +44,27 @@ export async function POST(request: NextRequest) {
 
     console.log('Forwarding to model service:', `${modelServiceUrl}/predict`)
 
+    // 记录推理开始时间(不包括图片下载时间)
+    const inferenceStartTime = Date.now()
+
     // 转发到模型服务
     const response = await fetch(`${modelServiceUrl}/predict`, {
       method: 'POST',
       body: formData,
     })
 
+    // 计算推理延迟
+    const inferenceLatency = Date.now() - inferenceStartTime
+
     if (response.ok) {
       const data = await response.json()
-      console.log('✅ Prediction result:', data)
-      return NextResponse.json(data)
+      console.log('✅ Prediction result:', data, `(inference latency: ${inferenceLatency}ms)`)
+
+      // 添加推理延迟到返回结果
+      return NextResponse.json({
+        ...data,
+        latency: inferenceLatency
+      })
     } else {
       const errorText = await response.text()
       console.error('❌ Prediction failed:', response.status, errorText)
