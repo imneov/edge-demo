@@ -4,9 +4,10 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://localhost:8
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
-  const path = params.path.join('/')
+  const { path: pathArray } = await params
+  const path = pathArray.join('/')
   const searchParams = request.nextUrl.searchParams.toString()
   const url = `${API_BASE_URL}/oapis/${path}${searchParams ? `?${searchParams}` : ''}`
 
@@ -31,9 +32,10 @@ export async function GET(
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { path: string[] } }
+  { params }: { params: Promise<{ path: string[] }> }
 ) {
-  const path = params.path.join('/')
+  const { path: pathArray } = await params
+  const path = pathArray.join('/')
   const url = `${API_BASE_URL}/oapis/${path}`
 
   try {
