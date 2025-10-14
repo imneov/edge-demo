@@ -672,8 +672,8 @@ function setupSendDataButton() {
                 const diagMap = {
                     'normal': '正常',
                     'lost circulation': '井漏',
-                    'stuck pipe risk': '卡钻风险',
-                    'pressure anomaly': '压力异常'
+                    'stuck pipe risk': '-',
+                    'pressure anomaly': '-'
                 };
 
                 const resultOverlay = document.getElementById('resultOverlay');
